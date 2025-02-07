@@ -46,24 +46,30 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
 
 # Streamlit UI
 st.title("PDF Page Merger (4-in-1) with Page Numbers")
-st.write("Upload a PDF, and we will merge every 4 pages into one.")
+st.write("Upload a PDF, and we will merge every 4 pages into one with page numbers.")
 
 uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
 
 if uploaded_file:
-    with open("temp_input.pdf", "wb") as f:
+    # Get original file name (without extension)
+    original_name = os.path.splitext(uploaded_file.name)[0]
+    output_filename = f"{original_name}_merged.pdf"
+
+    # Save the uploaded file temporarily
+    temp_input_path = "temp_input.pdf"
+    with open(temp_input_path, "wb") as f:
         f.write(uploaded_file.read())
 
-    output_pdf_path = "merged_output.pdf"
-    merge_four_pages_with_numbers("temp_input.pdf", output_pdf_path)
+    # Process the PDF
+    merge_four_pages_with_numbers(temp_input_path, output_filename)
 
-    with open(output_pdf_path, "rb") as f:
+    # Provide download button
+    with open(output_filename, "rb") as f:
         st.download_button(
             label="Download Processed PDF",
             data=f,
-            file_name="merged_output.pdf",
+            file_name=output_filename,
             mime="application/pdf"
         )
 
-    st.success("Processing complete! Click above to download the merged PDF.")
-
+    st.success(f"Processing complete! Download '{output_filename}' above.")
