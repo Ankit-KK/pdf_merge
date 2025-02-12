@@ -1,9 +1,7 @@
 streamlit
-pymupdf
 python-pptx
-pptx2pdf
-python-docx
-Pillow
-pdf2image
-ebooklib
 reportlab
+ebooklib
+Pillow
+pymupdf
+pdf2image
