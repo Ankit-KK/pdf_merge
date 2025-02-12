@@ -5,17 +5,18 @@ from pathlib import Path
 import tempfile
 from pptx import Presentation
 from pptx.util import Inches, Pt
-import io
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from copy import deepcopy
 
 def merge_four_slides_pptx(input_path, output_path):
-    """Merge four slides into one in PowerPoint"""
+    """Merge four slides into one in PowerPoint while preserving all content"""
     # Open the presentation
     prs = Presentation(input_path)
     new_prs = Presentation()
     
     # Set slide width and height (standard 16:9)
-    new_prs.slide_width = Inches(13.333)
-    new_prs.slide_height = Inches(7.5)
+    new_prs.slide_width = prs.slide_width
+    new_prs.slide_height = prs.slide_height
     
     # Calculate dimensions for each quadrant
     quad_width = new_prs.slide_width / 2
@@ -33,61 +34,70 @@ def merge_four_slides_pptx(input_path, output_path):
                 src_slide = prs.slides[i + j]
                 
                 # Calculate position for this quadrant
-                left = quad_width * (j % 2)
-                top = quad_height * (j // 2)
+                x_offset = 0 if j % 2 == 0 else quad_width
+                y_offset = 0 if j < 2 else quad_height
                 
                 # Copy all shapes from source slide
                 for shape in src_slide.shapes:
-                    # Scale factor for the shape
-                    scale_x = 0.5  # Because we're fitting into half width
-                    scale_y = 0.5  # Because we're fitting into half height
-                    
-                    if shape.shape_type == 17:  # If shape is a connector
-                        continue  # Skip connectors as they can cause issues
-                        
-                    # Get the original dimensions
-                    orig_left = shape.left
-                    orig_top = shape.top
-                    orig_width = shape.width
-                    orig_height = shape.height
+                    # Get element position and size
+                    left = shape.left
+                    top = shape.top
+                    width = shape.width
+                    height = shape.height
                     
                     # Calculate new position and size
-                    new_left = left + (orig_left * scale_x)
-                    new_top = top + (orig_top * scale_y)
-                    new_width = orig_width * scale_x
-                    new_height = orig_height * scale_y
+                    new_left = x_offset + (left * 0.5)
+                    new_top = y_offset + (top * 0.5)
+                    new_width = width * 0.5
+                    new_height = height * 0.5
                     
-                    # Copy shape to new position
-                    if hasattr(shape, 'text'):
+                    # Copy shape based on its type
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        # For pictures
+                        image = shape.image
+                        new_picture = new_slide.shapes.add_picture(
+                            image.blob,
+                            new_left,
+                            new_top,
+                            new_width,
+                            new_height
+                        )
+                    elif shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+                        # For basic shapes
+                        new_shape = new_slide.shapes.add_shape(
+                            shape.auto_shape_type,
+                            new_left,
+                            new_top,
+                            new_width,
+                            new_height
+                        )
+                        # Copy fill
+                        if hasattr(shape.fill, 'fore_color'):
+                            new_shape.fill.fore_color.rgb = shape.fill.fore_color.rgb
+                    elif hasattr(shape, 'text'):
+                        # For text boxes
                         text_box = new_slide.shapes.add_textbox(
-                            new_left, new_top, new_width, new_height
+                            new_left,
+                            new_top,
+                            new_width,
+                            new_height
                         )
                         text_frame = text_box.text_frame
                         text_frame.text = shape.text
                         
                         # Copy text formatting
-                        for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
-                            if para_idx < len(text_frame.paragraphs):
-                                new_para = text_frame.paragraphs[para_idx]
-                                new_para.text = paragraph.text
-                                
-                                # Handle text formatting
-                                if hasattr(paragraph, 'runs') and paragraph.runs:
-                                    for run_idx, run in enumerate(paragraph.runs):
-                                        if run_idx < len(new_para.runs):
-                                            new_run = new_para.runs[run_idx]
-                                            if hasattr(run.font, 'size') and run.font.size is not None:
-                                                try:
-                                                    new_size = Pt(int(run.font.size.pt * scale_y))
-                                                    new_run.font.size = new_size
-                                                except AttributeError:
-                                                    # Skip if size cannot be determined
-                                                    pass
-                    
+                        for p_idx, p in enumerate(shape.text_frame.paragraphs):
+                            if p_idx < len(text_frame.paragraphs):
+                                new_p = text_frame.paragraphs[p_idx]
+                                new_p.text = p.text
+                                if p.font:
+                                    if p.font.size:
+                                        new_p.font.size = Pt(int(p.font.size.pt * 0.5))
+                
                 # Add slide number
                 slide_num = new_slide.shapes.add_textbox(
-                    left + Inches(0.1),
-                    top + Inches(0.1),
+                    x_offset + Inches(0.1),
+                    y_offset + Inches(0.1),
                     Inches(1),
                     Inches(0.3)
                 )
@@ -182,3 +192,4 @@ if uploaded_file:
     
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
+        st.error("Error details for debugging:", str(e.__class__.__name__))
