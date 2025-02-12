@@ -5,4 +5,3 @@ ebooklib
 Pillow
 pymupdf
 pdf2image
-comtypes
