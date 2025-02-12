@@ -9,7 +9,6 @@ from pdf2image import convert_from_path
 from ebooklib import epub
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-import comtypes.client  # For converting PPTX to PDF on Windows
 
 # Function to merge every 4 pages into one with numbers
 def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
@@ -49,14 +48,14 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
     output_doc.save(output_pdf_path)
     output_doc.close()
 
-# Function to convert PPTX slides to PDF using PowerPoint (Windows only)
+# Function to convert PPTX slides to PDF
 def convert_pptx_to_pdf(input_path, output_path):
-    powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
-    powerpoint.Visible = 1
-    deck = powerpoint.Presentations.Open(input_path)
-    deck.SaveAs(output_path, 32)  # 32 is the constant for PDF format
-    deck.Close()
-    powerpoint.Quit()
+    from io import BytesIO
+    from pptx2pdf import convert
+
+    # Create a temporary directory to save the converted PDF
+    temp_pptx = BytesIO(input_path)
+    convert(temp_pptx, output_path)
 
 # Function to convert Word DOCX to PDF
 def convert_docx_to_pdf(input_path, output_path):
