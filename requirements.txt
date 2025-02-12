@@ -1,1 +1,7 @@
 pymupdf
+python-pptx
+python-docx
+Pillow
+ebooklib
+pdf2image
+reportlab
