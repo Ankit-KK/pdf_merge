@@ -1,239 +1,129 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz
 import os
-from datetime import datetime
-from io import BytesIO
-from pptx import Presentation
-from docx import Document
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from PIL import Image
-import ebooklib
-from ebooklib import epub
-from bs4 import BeautifulSoup
+from pathlib import Path
+import tempfile
+from pdf2image import convert_from_path
+import comtypes.client
+import win32com.client
+import pythoncom
 
-# Function to merge pages with numbers
-def merge_pages_with_numbers(input_pdf_path, output_pdf_path, rows=2, cols=2, 
-                            font_size=12, page_num_pos="top-left", font_color=(0, 0, 0)):
+def convert_ppt_to_pdf(input_path, output_path):
+    """Convert PowerPoint to PDF"""
+    pythoncom.CoInitialize()
+    powerpoint = win32com.client.Dispatch("Powerpoint.Application")
+    deck = powerpoint.Presentations.Open(input_path)
+    deck.SaveAs(output_path, 32)  # 32 is the PDF format code
+    deck.Close()
+    powerpoint.Quit()
+
+def convert_doc_to_pdf(input_path, output_path):
+    """Convert Word document to PDF"""
+    pythoncom.CoInitialize()
+    word = win32com.client.Dispatch("Word.Application")
+    doc = word.Documents.Open(input_path)
+    doc.SaveAs(output_path, FileFormat=17)  # 17 is the PDF format code
+    doc.Close()
+    word.Quit()
+
+def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
+    """Merge four pages into one with page numbers"""
     doc = fitz.open(input_pdf_path)
     num_pages = len(doc)
     output_doc = fitz.open()
-
-    # Calculate layout dimensions
+    
+    # Page dimensions
     page_width = doc[0].rect.width
     page_height = doc[0].rect.height
-    new_width = page_width * cols
-    new_height = page_height * rows
-
-    # Page number position mapping
-    pos_offsets = {
-        "top-left": (10, 20),
-        "top-right": (page_width - 50, 20),
-        "bottom-left": (10, page_height - 20),
-        "bottom-right": (page_width - 50, page_height - 20)
-    }
-
-    per_sheet = rows * cols
-    total_sheets = (num_pages + per_sheet - 1) // per_sheet
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for sheet_num in range(total_sheets):
-        status_text.text(f"Processing sheet {sheet_num + 1}/{total_sheets}")
-        progress_bar.progress((sheet_num + 1) / total_sheets)
-        
+    
+    # New page dimensions (same width, but 2x height)
+    new_width = page_width * 2
+    new_height = page_height * 2
+    
+    for i in range(0, num_pages, 4):
+        # Create a new blank page
         new_page = output_doc.new_page(width=new_width, height=new_height)
         
-        for pos_in_sheet in range(per_sheet):
-            page_index = sheet_num * per_sheet + pos_in_sheet
-            if page_index >= num_pages:
-                break
-
-            # Calculate position
-            col = pos_in_sheet % cols
-            row = pos_in_sheet // cols
-            
-            x_offset = col * page_width
-            y_offset = row * page_height
-
-            # Add page content
-            src_page = doc[page_index]
-            new_page.show_pdf_page(
-                fitz.Rect(x_offset, y_offset, x_offset + page_width, y_offset + page_height),
-                doc,
-                page_index
-            )
-
-            # Add page number
-            if page_num_pos in pos_offsets:
-                num_x = x_offset + pos_offsets[page_num_pos][0]
-                num_y = y_offset + pos_offsets[page_num_pos][1]
+        for j in range(4):
+            if i + j < num_pages:  # Check if page exists
+                src_page = doc[i + j]
+                x_offset = (j % 2) * page_width  # Left or right
+                y_offset = (j // 2) * page_height  # Top or bottom
                 
-                new_page.insert_text(
-                    (num_x, num_y),
-                    f"{page_index + 1}",
-                    fontsize=font_size,
-                    color=font_color
+                # Paste the source page onto the new page at the correct position
+                new_page.show_pdf_page(
+                    fitz.Rect(x_offset, y_offset, x_offset + page_width, y_offset + page_height),
+                    doc,
+                    i + j
                 )
-
-    progress_bar.empty()
-    status_text.empty()
+                
+                # Add page number
+                page_number = i + j + 1
+                new_page.insert_text(
+                    (x_offset + 10, y_offset + 20),  # Position near top-left
+                    f"Page {page_number}",
+                    fontsize=12,
+                    color=(0, 0, 0)  # Black color
+                )
+    
     output_doc.save(output_pdf_path)
     output_doc.close()
 
-# Function to convert PPTX to PDF
-def pptx_to_pdf(pptx_path, pdf_path):
-    prs = Presentation(pptx_path)
-    pdf_buffer = BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)
-    width, height = letter
-
-    for slide in prs.slides:
-        # Extract text from each slide
-        text = ""
-        for shape in slide.shapes:
-            if hasattr(shape, "text"):
-                text += shape.text + "\n"
-        
-        # Add text to PDF
-        c.drawString(72, height - 72, text)
-        c.showPage()
-
-    c.save()
-    pdf_buffer.seek(0)
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_buffer.read())
-
-# Function to convert DOCX to PDF
-def docx_to_pdf(docx_path, pdf_path):
-    doc = Document(docx_path)
-    pdf_buffer = BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)
-    width, height = letter
-
-    for para in doc.paragraphs:
-        c.drawString(72, height - 72, para.text)
-        c.showPage()
-
-    c.save()
-    pdf_buffer.seek(0)
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_buffer.read())
-
-# Function to convert images to PDF
-def images_to_pdf(image_paths, pdf_path):
-    pdf_doc = fitz.open()
-    for img_path in image_paths:
-        img = Image.open(img_path)
-        img_page = pdf_doc.new_page(width=img.width, height=img.height)
-        img_page.insert_image(img_page.rect, filename=img_path)
-    pdf_doc.save(pdf_path)
-    pdf_doc.close()
-
-# Function to convert EPUB to PDF
-def epub_to_pdf(epub_path, pdf_path):
-    book = epub.read_epub(epub_path)
-    pdf_doc = fitz.open()
-    
-    for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            soup = BeautifulSoup(item.get_content(), 'html.parser')
-            text = soup.get_text()
-            pdf_page = pdf_doc.new_page()
-            pdf_page.insert_text((72, 72), text)
-    
-    pdf_doc.save(pdf_path)
-    pdf_doc.close()
-
-# Function to convert TXT to PDF
-def txt_to_pdf(txt_path, pdf_path):
-    with open(txt_path, "r") as f:
-        text = f.read()
-    
-    pdf_buffer = BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)
-    width, height = letter
-    c.drawString(72, height - 72, text)
-    c.save()
-    
-    pdf_buffer.seek(0)
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_buffer.read())
-
 # Streamlit UI
-st.title("Multi-File Merger with Page Numbers")
-st.markdown("Merge PDF, PPTX, DOCX, Images, EPUB, or TXT files into a single PDF with customizable page numbers")
+st.title("Document Merger (4-in-1) with Page Numbers")
+st.write("Upload a PDF, PowerPoint, or Word document, and we will merge every 4 pages into one with page numbers.")
 
-with st.sidebar:
-    st.header("Settings")
-    cols = st.number_input("Columns per sheet", min_value=1, max_value=4, value=2)
-    rows = st.number_input("Rows per sheet", min_value=1, max_value=4, value=2)
-    font_size = st.slider("Page number size", 8, 24, 12)
-    page_num_pos = st.selectbox("Page number position", 
-                              ["top-left", "top-right", "bottom-left", "bottom-right"])
-    font_color = st.color_picker("Page number color", "#000000")
-
-uploaded_file = st.file_uploader("Upload file", type=["pdf", "pptx", "docx", "png", "jpg", "jpeg", "tiff", "bmp", "gif", "epub", "txt"])
+# File uploader that accepts multiple formats
+uploaded_file = st.file_uploader("Upload a document", type=["pdf", "ppt", "pptx", "doc", "docx"])
 
 if uploaded_file:
     try:
-        # Generate unique filenames
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        temp_input = f"temp_input_{timestamp}.{uploaded_file.name.split('.')[-1]}"
-        temp_pdf = f"temp_pdf_{timestamp}.pdf"
-        output_file = f"merged_output_{timestamp}.pdf"
-
-        # Save uploaded file
-        with open(temp_input, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        # Convert to PDF if necessary
-        if uploaded_file.type == "application/pdf":
-            temp_pdf = temp_input
-        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-            pptx_to_pdf(temp_input, temp_pdf)
-        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            docx_to_pdf(temp_input, temp_pdf)
-        elif uploaded_file.type in ["image/png", "image/jpeg", "image/tiff", "image/bmp", "image/gif"]:
-            images_to_pdf([temp_input], temp_pdf)
-        elif uploaded_file.type == "application/epub+zip":
-            epub_to_pdf(temp_input, temp_pdf)
-        elif uploaded_file.type == "text/plain":
-            txt_to_pdf(temp_input, temp_pdf)
-
-        # Process PDF
-        with st.spinner("Processing file..."):
-            merge_pages_with_numbers(
-                temp_pdf,
-                output_file,
-                rows=rows,
-                cols=cols,
-                font_size=font_size,
-                page_num_pos=page_num_pos,
-                font_color=tuple(int(font_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-            )
-
-        # Show preview
-        with fitz.open(output_file) as doc:
-            if len(doc) > 0:
-                pix = doc[0].get_pixmap()
-                preview_img = pix.tobytes("png")
-                st.image(preview_img, caption="First Page Preview", use_column_width=True)
-
-        # Download button
-        with open(output_file, "rb") as f:
-            st.download_button(
-                "Download Merged PDF",
-                data=f,
-                file_name=output_file,
-                mime="application/pdf"
-            )
-
+        # Create temporary directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Get original file info
+            original_name = Path(uploaded_file.name).stem
+            file_extension = Path(uploaded_file.name).suffix.lower()
+            
+            # Save the uploaded file temporarily
+            temp_input_path = os.path.join(temp_dir, f"input{file_extension}")
+            with open(temp_input_path, "wb") as f:
+                f.write(uploaded_file.read())
+            
+            # Convert to PDF if necessary
+            temp_pdf_path = os.path.join(temp_dir, "temp.pdf")
+            
+            if file_extension in ['.ppt', '.pptx']:
+                st.info("Converting PowerPoint to PDF...")
+                convert_ppt_to_pdf(temp_input_path, temp_pdf_path)
+                input_pdf_path = temp_pdf_path
+            
+            elif file_extension in ['.doc', '.docx']:
+                st.info("Converting Word document to PDF...")
+                convert_doc_to_pdf(temp_input_path, temp_pdf_path)
+                input_pdf_path = temp_pdf_path
+            
+            else:  # PDF
+                input_pdf_path = temp_input_path
+            
+            # Output filename
+            output_filename = f"{original_name}_merged.pdf"
+            output_path = os.path.join(temp_dir, output_filename)
+            
+            # Process the PDF
+            with st.spinner("Merging pages..."):
+                merge_four_pages_with_numbers(input_pdf_path, output_path)
+            
+            # Provide download button
+            with open(output_path, "rb") as f:
+                st.download_button(
+                    label="Download Processed Document",
+                    data=f,
+                    file_name=output_filename,
+                    mime="application/pdf"
+                )
+            
+            st.success(f"Processing complete! Download '{output_filename}' above.")
+    
     except Exception as e:
-        st.error(f"Error processing file: {str(e)}")
-    finally:
-        # Cleanup temporary files
-        for file in [temp_input, temp_pdf, output_file]:
-            if os.path.exists(file):
-                os.remove(file)
+        st.error(f"An error occurred: {str(e)}")
+        st.error("Please make sure you have Microsoft Office installed if processing PowerPoint or Word documents.")
