@@ -2,7 +2,17 @@ import streamlit as st
 import fitz  # PyMuPDF
 import os
 from datetime import datetime
+from io import BytesIO
+from pptx import Presentation
+from docx import Document
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from PIL import Image
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup
 
+# Function to merge pages with numbers
 def merge_pages_with_numbers(input_pdf_path, output_pdf_path, rows=2, cols=2, 
                             font_size=12, page_num_pos="top-left", font_color=(0, 0, 0)):
     doc = fitz.open(input_pdf_path)
@@ -72,9 +82,81 @@ def merge_pages_with_numbers(input_pdf_path, output_pdf_path, rows=2, cols=2,
     output_doc.save(output_pdf_path)
     output_doc.close()
 
+# Function to convert PPTX to PDF
+def pptx_to_pdf(pptx_path, pdf_path):
+    prs = Presentation(pptx_path)
+    pdf_doc = fitz.open()
+    
+    for slide in prs.slides:
+        img_path = f"temp_slide.png"
+        slide.save(img_path)
+        img = Image.open(img_path)
+        img_page = pdf_doc.new_page(width=img.width, height=img.height)
+        img_page.insert_image(img_page.rect, filename=img_path)
+        os.remove(img_path)
+    
+    pdf_doc.save(pdf_path)
+    pdf_doc.close()
+
+# Function to convert DOCX to PDF
+def docx_to_pdf(docx_path, pdf_path):
+    doc = Document(docx_path)
+    pdf_buffer = BytesIO()
+    c = canvas.Canvas(pdf_buffer, pagesize=letter)
+    width, height = letter
+
+    for para in doc.paragraphs:
+        c.drawString(72, height - 72, para.text)
+        c.showPage()
+
+    c.save()
+    pdf_buffer.seek(0)
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_buffer.read())
+
+# Function to convert images to PDF
+def images_to_pdf(image_paths, pdf_path):
+    pdf_doc = fitz.open()
+    for img_path in image_paths:
+        img = Image.open(img_path)
+        img_page = pdf_doc.new_page(width=img.width, height=img.height)
+        img_page.insert_image(img_page.rect, filename=img_path)
+    pdf_doc.save(pdf_path)
+    pdf_doc.close()
+
+# Function to convert EPUB to PDF
+def epub_to_pdf(epub_path, pdf_path):
+    book = epub.read_epub(epub_path)
+    pdf_doc = fitz.open()
+    
+    for item in book.get_items():
+        if item.get_type() == ebooklib.ITEM_DOCUMENT:
+            soup = BeautifulSoup(item.get_content(), 'html.parser')
+            text = soup.get_text()
+            pdf_page = pdf_doc.new_page()
+            pdf_page.insert_text((72, 72), text)
+    
+    pdf_doc.save(pdf_path)
+    pdf_doc.close()
+
+# Function to convert TXT to PDF
+def txt_to_pdf(txt_path, pdf_path):
+    with open(txt_path, "r") as f:
+        text = f.read()
+    
+    pdf_buffer = BytesIO()
+    c = canvas.Canvas(pdf_buffer, pagesize=letter)
+    width, height = letter
+    c.drawString(72, height - 72, text)
+    c.save()
+    
+    pdf_buffer.seek(0)
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_buffer.read())
+
 # Streamlit UI
-st.title("PDF Page Merger with Page Numbers")
-st.markdown("Merge multiple PDF pages into a single sheet with customizable page numbers")
+st.title("Multi-File Merger with Page Numbers")
+st.markdown("Merge PDF, PPTX, DOCX, Images, EPUB, or TXT files into a single PDF with customizable page numbers")
 
 with st.sidebar:
     st.header("Settings")
@@ -85,30 +167,46 @@ with st.sidebar:
                               ["top-left", "top-right", "bottom-left", "bottom-right"])
     font_color = st.color_picker("Page number color", "#000000")
 
-uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
+uploaded_file = st.file_uploader("Upload file", type=["pdf", "pptx", "docx", "png", "jpg", "jpeg", "tiff", "bmp", "gif", "epub", "txt"])
 
 if uploaded_file:
     try:
         # Generate unique filenames
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        temp_input = f"temp_input_{timestamp}.pdf"
+        temp_input = f"temp_input_{timestamp}.{uploaded_file.name.split('.')[-1]}"
+        temp_pdf = f"temp_pdf_{timestamp}.pdf"
         output_file = f"merged_output_{timestamp}.pdf"
 
         # Save uploaded file
         with open(temp_input, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
+        # Convert to PDF if necessary
+        if uploaded_file.type == "application/pdf":
+            temp_pdf = temp_input
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+            pptx_to_pdf(temp_input, temp_pdf)
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            docx_to_pdf(temp_input, temp_pdf)
+        elif uploaded_file.type in ["image/png", "image/jpeg", "image/tiff", "image/bmp", "image/gif"]:
+            images_to_pdf([temp_input], temp_pdf)
+        elif uploaded_file.type == "application/epub+zip":
+            epub_to_pdf(temp_input, temp_pdf)
+        elif uploaded_file.type == "text/plain":
+            txt_to_pdf(temp_input, temp_pdf)
+
         # Process PDF
-        with st.spinner("Processing PDF..."):
+        with st.spinner("Processing file..."):
             merge_pages_with_numbers(
-                temp_input,
+                temp_pdf,
                 output_file,
                 rows=rows,
                 cols=cols,
                 font_size=font_size,
                 page_num_pos=page_num_pos,
                 font_color=tuple(int(font_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-            
+            )
+
         # Show preview
         with fitz.open(output_file) as doc:
             if len(doc) > 0:
@@ -126,10 +224,9 @@ if uploaded_file:
             )
 
     except Exception as e:
-        st.error(f"Error processing PDF: {str(e)}")
+        st.error(f"Error processing file: {str(e)}")
     finally:
         # Cleanup temporary files
-        if os.path.exists(temp_input):
-            os.remove(temp_input)
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        for file in [temp_input, temp_pdf, output_file]:
+            if os.path.exists(file):
+                os.remove(file)
