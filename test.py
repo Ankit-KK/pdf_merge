@@ -4,54 +4,89 @@ import os
 from pathlib import Path
 import tempfile
 from pptx import Presentation
-from docx import Document
-from PIL import Image
+from pptx.util import Inches, Pt
 import io
 
-def convert_pptx_to_images(pptx_path):
-    """Convert PowerPoint slides to images"""
-    prs = Presentation(pptx_path)
-    images = []
+def merge_four_slides_pptx(input_path, output_path):
+    """Merge four slides into one in PowerPoint"""
+    # Open the presentation
+    prs = Presentation(input_path)
+    new_prs = Presentation()
     
-    for slide in prs.slides:
-        # Save slide as PNG
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            # You would need to implement the actual slide-to-image conversion here
-            # This is a placeholder for the conversion logic
-            img = Image.new('RGB', (1920, 1080), 'white')
-            img.save(tmp.name)
-            images.append(tmp.name)
+    # Set slide width and height (standard 16:9)
+    new_prs.slide_width = Inches(13.333)
+    new_prs.slide_height = Inches(7.5)
     
-    return images
+    # Calculate dimensions for each quadrant
+    quad_width = new_prs.slide_width / 2
+    quad_height = new_prs.slide_height / 2
+    
+    # Process slides in groups of 4
+    for i in range(0, len(prs.slides), 4):
+        # Add a blank slide
+        blank_slide_layout = new_prs.slide_layouts[6]  # Usually layout 6 is blank
+        new_slide = new_prs.slides.add_slide(blank_slide_layout)
+        
+        # Process up to 4 slides for this group
+        for j in range(4):
+            if i + j < len(prs.slides):
+                src_slide = prs.slides[i + j]
+                
+                # Calculate position for this quadrant
+                left = quad_width * (j % 2)
+                top = quad_height * (j // 2)
+                
+                # Copy all shapes from source slide
+                for shape in src_slide.shapes:
+                    # Scale factor for the shape
+                    scale_x = 0.5  # Because we're fitting into half width
+                    scale_y = 0.5  # Because we're fitting into half height
+                    
+                    if shape.shape_type == 17:  # If shape is a connector
+                        continue  # Skip connectors as they can cause issues
+                        
+                    # Get the original dimensions
+                    orig_left = shape.left
+                    orig_top = shape.top
+                    orig_width = shape.width
+                    orig_height = shape.height
+                    
+                    # Calculate new position and size
+                    new_left = left + (orig_left * scale_x)
+                    new_top = top + (orig_top * scale_y)
+                    new_width = orig_width * scale_x
+                    new_height = orig_height * scale_y
+                    
+                    # Copy shape to new position
+                    if hasattr(shape, 'text'):
+                        text_box = new_slide.shapes.add_textbox(
+                            new_left, new_top, new_width, new_height
+                        )
+                        text_frame = text_box.text_frame
+                        text_frame.text = shape.text
+                        
+                        # Copy text formatting
+                        for para_idx, paragraph in enumerate(shape.text_frame.paragraphs):
+                            if para_idx < len(text_frame.paragraphs):
+                                new_para = text_frame.paragraphs[para_idx]
+                                new_para.text = paragraph.text
+                                if paragraph.font:
+                                    new_para.font.size = Pt(int(paragraph.font.size.pt * scale_y))
+                    
+                # Add slide number
+                slide_num = new_slide.shapes.add_textbox(
+                    left + Inches(0.1),
+                    top + Inches(0.1),
+                    Inches(1),
+                    Inches(0.3)
+                )
+                slide_num.text_frame.text = f"Slide {i + j + 1}"
+    
+    # Save the presentation
+    new_prs.save(output_path)
 
-def convert_docx_to_images(docx_path):
-    """Convert Word document pages to images"""
-    doc = Document(docx_path)
-    images = []
-    
-    # Since python-docx doesn't directly support page rendering,
-    # we'll need to use a PDF intermediate step with a different library
-    # This is a placeholder for the actual conversion logic
-    img = Image.new('RGB', (1920, 1080), 'white')
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-        img.save(tmp.name)
-        images.append(tmp.name)
-    
-    return images
-
-def images_to_pdf(image_paths, output_path):
-    """Convert images to PDF"""
-    doc = fitz.open()
-    for img_path in image_paths:
-        img_doc = fitz.open(img_path)
-        pdfbytes = img_doc.convert_to_pdf()
-        img_pdf = fitz.open("pdf", pdfbytes)
-        doc.insert_pdf(img_pdf)
-    doc.save(output_path)
-    doc.close()
-
-def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
-    """Merge four pages into one with page numbers"""
+def merge_four_pages_pdf(input_pdf_path, output_pdf_path):
+    """Merge four pages into one in PDF"""
     doc = fitz.open(input_pdf_path)
     num_pages = len(doc)
     output_doc = fitz.open()
@@ -93,10 +128,10 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
     output_doc.close()
 
 # Streamlit UI
-st.title("Document Merger (4-in-1) with Page Numbers")
-st.write("Upload a PDF, PowerPoint, or Word document, and we will merge every 4 pages into one with page numbers.")
+st.title("Document Merger (4-in-1)")
+st.write("Upload a PDF or PowerPoint file, and we will merge every 4 pages into one.")
 
-uploaded_file = st.file_uploader("Upload a document", type=["pdf", "pptx", "docx"])
+uploaded_file = st.file_uploader("Upload a document", type=["pdf", "pptx"])
 
 if uploaded_file:
     try:
@@ -110,47 +145,26 @@ if uploaded_file:
             with open(temp_input_path, "wb") as f:
                 f.write(uploaded_file.read())
             
-            # Convert to PDF if necessary
-            temp_pdf_path = os.path.join(temp_dir, "temp.pdf")
-            
-            if file_extension == '.pptx':
-                st.info("Converting PowerPoint to PDF...")
-                images = convert_pptx_to_images(temp_input_path)
-                images_to_pdf(images, temp_pdf_path)
-                input_pdf_path = temp_pdf_path
-                
-                # Clean up temporary image files
-                for img_path in images:
-                    os.unlink(img_path)
-            
-            elif file_extension == '.docx':
-                st.info("Converting Word document to PDF...")
-                images = convert_docx_to_images(temp_input_path)
-                images_to_pdf(images, temp_pdf_path)
-                input_pdf_path = temp_pdf_path
-                
-                # Clean up temporary image files
-                for img_path in images:
-                    os.unlink(img_path)
-            
-            else:  # PDF
-                input_pdf_path = temp_input_path
-            
-            # Output filename
-            output_filename = f"{original_name}_merged.pdf"
+            # Output filename with same extension as input
+            output_filename = f"{original_name}_merged{file_extension}"
             output_path = os.path.join(temp_dir, output_filename)
             
-            # Process the PDF
+            # Process based on file type
             with st.spinner("Merging pages..."):
-                merge_four_pages_with_numbers(input_pdf_path, output_path)
+                if file_extension == '.pptx':
+                    merge_four_slides_pptx(temp_input_path, output_path)
+                else:  # PDF
+                    merge_four_pages_pdf(temp_input_path, output_path)
             
             # Provide download button
             with open(output_path, "rb") as f:
+                mime_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' \
+                    if file_extension == '.pptx' else 'application/pdf'
                 st.download_button(
                     label="Download Processed Document",
                     data=f,
                     file_name=output_filename,
-                    mime="application/pdf"
+                    mime=mime_type
                 )
             
             st.success(f"Processing complete! Download '{output_filename}' above.")
