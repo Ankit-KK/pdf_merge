@@ -6,4 +6,4 @@ Pillow
 pymupdf
 pdf2image
 python-docx
-python-pptx2pdf
+pptx2pdf
