@@ -1,17 +1,14 @@
 import streamlit as st
-import fitz  # PyMuPDF for PDFs
 import os
 from pptx import Presentation
-from docx import Document
-from PIL import Image
-import io
-from pdf2image import convert_from_path
-from ebooklib import epub
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from io import BytesIO
+from PIL import Image
 
 # Function to merge every 4 pages into one with numbers
 def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
+    import fitz  # PyMuPDF for PDFs
     doc = fitz.open(input_pdf_path)
     num_pages = len(doc)
     output_doc = fitz.open()
@@ -48,7 +45,7 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
     output_doc.save(output_pdf_path)
     output_doc.close()
 
-# Function to convert PPTX slides to PDF
+# Function to convert PPTX slides to PDF with images
 def convert_pptx_to_pdf(input_path, output_path):
     presentation = Presentation(input_path)
     pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
@@ -56,75 +53,33 @@ def convert_pptx_to_pdf(input_path, output_path):
     slide_width = presentation.slide_width
     slide_height = presentation.slide_height
 
-    # Set up for rendering each slide's content to the PDF
+    # Convert slide width/height from PowerPoint's EMU to PDF's points
+    slide_width = slide_width / 12700  # 1 point = 1/72 inch, PowerPoint uses EMU (English Metric Units)
+    slide_height = slide_height / 12700
+
+    # Loop through each slide in the presentation
     for slide_number, slide in enumerate(presentation.slides):
         pdf_canvas.setPageSize((slide_width, slide_height))
         pdf_canvas.showPage()
 
+        # Extract and draw text from slide shapes
         for shape in slide.shapes:
-            if hasattr(shape, "text"):
+            if hasattr(shape, "text") and shape.text.strip():
                 text = shape.text.strip()
-                if text:
-                    pdf_canvas.drawString(100, slide_height - 100, text)
+                # You can adjust the positioning based on your needs (e.g., prevent overlapping)
+                pdf_canvas.drawString(100, slide_height - 100, text)
 
-        # Move to the next page if necessary
+            # Extract and draw images from slide shapes
+            if hasattr(shape, "image") and shape.image:
+                image_stream = BytesIO(shape.image.blob)
+                img = Image.open(image_stream)
+                # Save the image as a temporary file to use with reportlab
+                img_path = "/tmp/temp_image.png"
+                img.save(img_path)
+                pdf_canvas.drawImage(img_path, 50, slide_height - 300, width=300, height=200)
+
+        # Move to the next page for the next slide
         pdf_canvas.showPage()
-
-    pdf_canvas.save()
-
-# Function to convert Word DOCX to PDF
-def convert_docx_to_pdf(input_path, output_path):
-    doc = Document(input_path)
-    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
-    
-    y_position = 750  # Start position for text
-    for para in doc.paragraphs:
-        pdf_canvas.drawString(100, y_position, para.text)
-        y_position -= 20  # Move down for next line
-
-        if y_position < 50:
-            pdf_canvas.showPage()
-            y_position = 750
-
-    pdf_canvas.save()
-
-# Function to convert images to PDF
-def convert_images_to_pdf(image_paths, output_path):
-    images = [Image.open(img_path).convert("RGB") for img_path in image_paths]
-    images[0].save(output_path, save_all=True, append_images=images[1:])
-
-# Function to convert EPUB to PDF
-def convert_epub_to_pdf(input_path, output_path):
-    book = epub.read_epub(input_path)
-    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
-
-    y_position = 750  # Start position
-    for item in book.get_items():
-        if item.get_type() == 9:  # 9 means it's text
-            content = item.get_content().decode('utf-8')
-            for line in content.split("\n"):
-                pdf_canvas.drawString(100, y_position, line[:100])  # Trim to fit
-                y_position -= 20
-                if y_position < 50:
-                    pdf_canvas.showPage()
-                    y_position = 750
-
-    pdf_canvas.save()
-
-# Function to convert TXT to PDF
-def convert_txt_to_pdf(input_path, output_path):
-    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
-
-    with open(input_path, "r", encoding="utf-8") as file:
-        lines = file.readlines()
-
-    y_position = 750
-    for line in lines:
-        pdf_canvas.drawString(100, y_position, line.strip())
-        y_position -= 20
-        if y_position < 50:
-            pdf_canvas.showPage()
-            y_position = 750
 
     pdf_canvas.save()
 
@@ -132,7 +87,7 @@ def convert_txt_to_pdf(input_path, output_path):
 st.title("📚 Multi-Format File Merger (4-in-1) with Page Numbers")
 st.write("Upload a file, and we'll process it into a 4-in-1 formatted PDF.")
 
-uploaded_file = st.file_uploader("Upload a file", type=["pdf", "pptx", "docx", "png", "jpg", "jpeg", "tiff", "bmp", "gif", "epub", "txt"])
+uploaded_file = st.file_uploader("Upload a file", type=["pptx"])
 
 if uploaded_file:
     file_extension = uploaded_file.name.split(".")[-1].lower()
@@ -144,32 +99,13 @@ if uploaded_file:
 
     output_pdf_path = f"{original_name}_converted.pdf"
     
-    # Process based on file type
-    if file_extension == "pdf":
-        merge_four_pages_with_numbers(temp_input_path, output_pdf_path)
-
-    elif file_extension == "pptx":
+    # Process PPTX
+    if file_extension == "pptx":
         convert_pptx_to_pdf(temp_input_path, output_pdf_path)
         merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
 
-    elif file_extension == "docx":
-        convert_docx_to_pdf(temp_input_path, output_pdf_path)
-        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
-
-    elif file_extension in ["png", "jpg", "jpeg", "tiff", "bmp", "gif"]:
-        convert_images_to_pdf([temp_input_path], output_pdf_path)
-        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
-
-    elif file_extension == "epub":
-        convert_epub_to_pdf(temp_input_path, output_pdf_path)
-        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
-
-    elif file_extension == "txt":
-        convert_txt_to_pdf(temp_input_path, output_pdf_path)
-        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
-
     else:
-        st.error("Unsupported file format. Please upload a supported format.")
+        st.error("Unsupported file format. Please upload a PPTX file.")
 
     # Provide download button
     with open(output_pdf_path, "rb") as f:
