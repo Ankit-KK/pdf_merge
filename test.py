@@ -85,18 +85,25 @@ def merge_pages_with_numbers(input_pdf_path, output_pdf_path, rows=2, cols=2,
 # Function to convert PPTX to PDF
 def pptx_to_pdf(pptx_path, pdf_path):
     prs = Presentation(pptx_path)
-    pdf_doc = fitz.open()
-    
+    pdf_buffer = BytesIO()
+    c = canvas.Canvas(pdf_buffer, pagesize=letter)
+    width, height = letter
+
     for slide in prs.slides:
-        img_path = f"temp_slide.png"
-        slide.save(img_path)
-        img = Image.open(img_path)
-        img_page = pdf_doc.new_page(width=img.width, height=img.height)
-        img_page.insert_image(img_page.rect, filename=img_path)
-        os.remove(img_path)
-    
-    pdf_doc.save(pdf_path)
-    pdf_doc.close()
+        # Extract text from each slide
+        text = ""
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text += shape.text + "\n"
+        
+        # Add text to PDF
+        c.drawString(72, height - 72, text)
+        c.showPage()
+
+    c.save()
+    pdf_buffer.seek(0)
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_buffer.read())
 
 # Function to convert DOCX to PDF
 def docx_to_pdf(docx_path, pdf_path):
