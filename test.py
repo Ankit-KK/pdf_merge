@@ -2,7 +2,6 @@ import streamlit as st
 import fitz  # PyMuPDF for PDFs
 import os
 from pptx import Presentation
-from pptx2pdf import convert
 from docx import Document
 from PIL import Image
 import io
@@ -51,7 +50,23 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
 
 # Function to convert PPTX slides to PDF
 def convert_pptx_to_pdf(input_path, output_path):
-    convert(input_path, output_path)
+    prs = Presentation(input_path)
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
+    
+    for slide in prs.slides:
+        # Get slide content
+        y_position = 750  # Set the initial y-position for text
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    pdf_canvas.drawString(100, y_position, para.text)
+                    y_position -= 20
+                    if y_position < 50:
+                        pdf_canvas.showPage()
+                        y_position = 750
+        pdf_canvas.showPage()
+    
+    pdf_canvas.save()
 
 # Function to convert Word DOCX to PDF
 def convert_docx_to_pdf(input_path, output_path):
