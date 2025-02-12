@@ -5,5 +5,3 @@ ebooklib
 Pillow
 pymupdf
 pdf2image
-python-docx
-pptx2pdf
