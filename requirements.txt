@@ -8,5 +8,4 @@ pdf2image
 python-docx
 ebooklib
 beautifulsoup4
-pywin32
-comtypes
+
