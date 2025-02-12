@@ -5,3 +5,4 @@ Pillow
 ebooklib
 pdf2image
 reportlab
+pptx2pdf
