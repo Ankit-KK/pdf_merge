@@ -1,138 +1,164 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF for PDFs
 import os
-import tempfile
 from pptx import Presentation
+from pptx2pdf import convert
 from docx import Document
 from PIL import Image
-import ebooklib
-from ebooklib import epub
 import io
+from pdf2image import convert_from_path
+from ebooklib import epub
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
-# Function to merge four pages into one
-# (Same as before, used for PDFs and converted formats)
+# Function to merge every 4 pages into one with numbers
 def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
     doc = fitz.open(input_pdf_path)
     num_pages = len(doc)
     output_doc = fitz.open()
 
-    page_width, page_height = doc[0].rect.width, doc[0].rect.height
-    new_width, new_height = page_width * 2, page_height * 2
+    page_width = doc[0].rect.width
+    page_height = doc[0].rect.height
+
+    new_width = page_width * 2
+    new_height = page_height * 2
 
     for i in range(0, num_pages, 4):
         new_page = output_doc.new_page(width=new_width, height=new_height)
+
         for j in range(4):
             if i + j < num_pages:
                 src_page = doc[i + j]
-                x_offset, y_offset = (j % 2) * page_width, (j // 2) * page_height
+                x_offset = (j % 2) * page_width
+                y_offset = (j // 2) * page_height
+
                 new_page.show_pdf_page(
                     fitz.Rect(x_offset, y_offset, x_offset + page_width, y_offset + page_height),
                     doc,
                     i + j
                 )
-                new_page.insert_text((x_offset + 10, y_offset + 20), f"Page {i + j + 1}", fontsize=12, color=(0, 0, 0))
+
+                page_number = i + j + 1
+                new_page.insert_text(
+                    (x_offset + 10, y_offset + 20),
+                    f"Page {page_number}",
+                    fontsize=12,
+                    color=(0, 0, 0)
+                )
 
     output_doc.save(output_pdf_path)
     output_doc.close()
 
-# Convert PPTX to PDF
-def convert_pptx_to_pdf(input_pptx_path, output_pdf_path):
-    prs = Presentation(input_pptx_path)
-    pdf_doc = fitz.open()
-    
-    for slide in prs.slides:
-        img = slide_to_image(slide)
-        pdf_bytes = image_to_pdf(img)
-        pdf_doc.insert_pdf(fitz.open(stream=pdf_bytes, filetype="pdf"))
-    
-    pdf_doc.save(output_pdf_path)
-    pdf_doc.close()
+# Function to convert PPTX slides to PDF
+def convert_pptx_to_pdf(input_path, output_path):
+    convert(input_path, output_path)
 
-# Convert DOCX to PDF
-def convert_docx_to_pdf(input_docx_path, output_pdf_path):
-    doc = Document(input_docx_path)
-    pdf_doc = fitz.open()
+# Function to convert Word DOCX to PDF
+def convert_docx_to_pdf(input_path, output_path):
+    doc = Document(input_path)
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
     
+    y_position = 750  # Start position for text
     for para in doc.paragraphs:
-        text_page = fitz.open()
-        text_page.insert_page(0, text=para.text, fontsize=12)
-        pdf_doc.insert_pdf(text_page)
-    
-    pdf_doc.save(output_pdf_path)
-    pdf_doc.close()
+        pdf_canvas.drawString(100, y_position, para.text)
+        y_position -= 20  # Move down for next line
 
-# Convert image to PDF
-def image_to_pdf(image):
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format='PDF')
-    return img_bytes.getvalue()
+        if y_position < 50:
+            pdf_canvas.showPage()
+            y_position = 750
 
-# Convert EPUB to PDF
-def convert_epub_to_pdf(input_epub_path, output_pdf_path):
-    book = epub.read_epub(input_epub_path)
-    pdf_doc = fitz.open()
-    
+    pdf_canvas.save()
+
+# Function to convert images to PDF
+def convert_images_to_pdf(image_paths, output_path):
+    images = [Image.open(img_path).convert("RGB") for img_path in image_paths]
+    images[0].save(output_path, save_all=True, append_images=images[1:])
+
+# Function to convert EPUB to PDF
+def convert_epub_to_pdf(input_path, output_path):
+    book = epub.read_epub(input_path)
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
+
+    y_position = 750  # Start position
     for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            text_page = fitz.open()
-            text_page.insert_page(0, text=item.get_content().decode("utf-8"), fontsize=12)
-            pdf_doc.insert_pdf(text_page)
-    
-    pdf_doc.save(output_pdf_path)
-    pdf_doc.close()
+        if item.get_type() == 9:  # 9 means it's text
+            content = item.get_content().decode('utf-8')
+            for line in content.split("\n"):
+                pdf_canvas.drawString(100, y_position, line[:100])  # Trim to fit
+                y_position -= 20
+                if y_position < 50:
+                    pdf_canvas.showPage()
+                    y_position = 750
+
+    pdf_canvas.save()
+
+# Function to convert TXT to PDF
+def convert_txt_to_pdf(input_path, output_path):
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
+
+    with open(input_path, "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    y_position = 750
+    for line in lines:
+        pdf_canvas.drawString(100, y_position, line.strip())
+        y_position -= 20
+        if y_position < 50:
+            pdf_canvas.showPage()
+            y_position = 750
+
+    pdf_canvas.save()
 
 # Streamlit UI
-st.title("Student File Merger (4-in-1) with Page Numbers")
-st.write("Upload a file, and we will merge every 4 pages/slides/images into one with page numbers.")
+st.title("📚 Multi-Format File Merger (4-in-1) with Page Numbers")
+st.write("Upload a file, and we'll process it into a 4-in-1 formatted PDF.")
 
-uploaded_file = st.file_uploader("Upload a file", type=["pdf", "pptx", "docx", "png", "jpg", "jpeg", "epub", "txt"])
+uploaded_file = st.file_uploader("Upload a file", type=["pdf", "pptx", "docx", "png", "jpg", "jpeg", "tiff", "bmp", "gif", "epub", "txt"])
 
 if uploaded_file:
-    temp_dir = tempfile.mkdtemp()
-    temp_input_path = os.path.join(temp_dir, uploaded_file.name)
+    file_extension = uploaded_file.name.split(".")[-1].lower()
+    original_name = os.path.splitext(uploaded_file.name)[0]
+    temp_input_path = f"{original_name}_input.{file_extension}"
+    
     with open(temp_input_path, "wb") as f:
         f.write(uploaded_file.read())
 
-    original_name = os.path.splitext(uploaded_file.name)[0]
-    output_pdf_path = os.path.join(temp_dir, f"{original_name}_merged.pdf")
-
-    # Process based on file type
-    if uploaded_file.type == "application/pdf":
-        merge_four_pages_with_numbers(temp_input_path, output_pdf_path)
-    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        ppt_pdf_path = os.path.join(temp_dir, "converted_ppt.pdf")
-        convert_pptx_to_pdf(temp_input_path, ppt_pdf_path)
-        merge_four_pages_with_numbers(ppt_pdf_path, output_pdf_path)
-    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc_pdf_path = os.path.join(temp_dir, "converted_doc.pdf")
-        convert_docx_to_pdf(temp_input_path, doc_pdf_path)
-        merge_four_pages_with_numbers(doc_pdf_path, output_pdf_path)
-    elif uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
-        img = Image.open(temp_input_path).convert("RGB")
-        img_pdf_path = os.path.join(temp_dir, "converted_img.pdf")
-        with open(img_pdf_path, "wb") as f:
-            f.write(image_to_pdf(img))
-        merge_four_pages_with_numbers(img_pdf_path, output_pdf_path)
-    elif uploaded_file.type == "application/epub+zip":
-        epub_pdf_path = os.path.join(temp_dir, "converted_epub.pdf")
-        convert_epub_to_pdf(temp_input_path, epub_pdf_path)
-        merge_four_pages_with_numbers(epub_pdf_path, output_pdf_path)
-    elif uploaded_file.type == "text/plain":
-        txt_pdf_path = os.path.join(temp_dir, "converted_txt.pdf")
-        with open(temp_input_path, "r", encoding="utf-8") as txt_file:
-            text = txt_file.read()
-        text_page = fitz.open()
-        text_page.insert_page(0, text=text, fontsize=12)
-        text_page.save(txt_pdf_path)
-        merge_four_pages_with_numbers(txt_pdf_path, output_pdf_path)
+    output_pdf_path = f"{original_name}_converted.pdf"
     
+    # Process based on file type
+    if file_extension == "pdf":
+        merge_four_pages_with_numbers(temp_input_path, output_pdf_path)
+
+    elif file_extension == "pptx":
+        convert_pptx_to_pdf(temp_input_path, output_pdf_path)
+        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
+
+    elif file_extension == "docx":
+        convert_docx_to_pdf(temp_input_path, output_pdf_path)
+        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
+
+    elif file_extension in ["png", "jpg", "jpeg", "tiff", "bmp", "gif"]:
+        convert_images_to_pdf([temp_input_path], output_pdf_path)
+        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
+
+    elif file_extension == "epub":
+        convert_epub_to_pdf(temp_input_path, output_pdf_path)
+        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
+
+    elif file_extension == "txt":
+        convert_txt_to_pdf(temp_input_path, output_pdf_path)
+        merge_four_pages_with_numbers(output_pdf_path, output_pdf_path)
+
+    else:
+        st.error("Unsupported file format. Please upload a supported format.")
+
     # Provide download button
     with open(output_pdf_path, "rb") as f:
         st.download_button(
-            label="Download Processed PDF",
+            label="📥 Download Processed PDF",
             data=f,
-            file_name=f"{original_name}_merged.pdf",
+            file_name=output_pdf_path,
             mime="application/pdf"
         )
 
-    st.success(f"Processing complete! Download '{original_name}_merged.pdf' above.")
+    st.success(f"✅ Processing complete! Download '{output_pdf_path}' above.")
