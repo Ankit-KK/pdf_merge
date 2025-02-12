@@ -70,8 +70,19 @@ def merge_four_slides_pptx(input_path, output_path):
                             if para_idx < len(text_frame.paragraphs):
                                 new_para = text_frame.paragraphs[para_idx]
                                 new_para.text = paragraph.text
-                                if paragraph.font:
-                                    new_para.font.size = Pt(int(paragraph.font.size.pt * scale_y))
+                                
+                                # Handle text formatting
+                                if hasattr(paragraph, 'runs') and paragraph.runs:
+                                    for run_idx, run in enumerate(paragraph.runs):
+                                        if run_idx < len(new_para.runs):
+                                            new_run = new_para.runs[run_idx]
+                                            if hasattr(run.font, 'size') and run.font.size is not None:
+                                                try:
+                                                    new_size = Pt(int(run.font.size.pt * scale_y))
+                                                    new_run.font.size = new_size
+                                                except AttributeError:
+                                                    # Skip if size cannot be determined
+                                                    pass
                     
                 # Add slide number
                 slide_num = new_slide.shapes.add_textbox(
