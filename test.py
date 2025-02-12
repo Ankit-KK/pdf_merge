@@ -50,12 +50,27 @@ def merge_four_pages_with_numbers(input_pdf_path, output_pdf_path):
 
 # Function to convert PPTX slides to PDF
 def convert_pptx_to_pdf(input_path, output_path):
-    from io import BytesIO
-    from pptx2pdf import convert
+    presentation = Presentation(input_path)
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
+    
+    slide_width = presentation.slide_width
+    slide_height = presentation.slide_height
 
-    # Create a temporary directory to save the converted PDF
-    temp_pptx = BytesIO(input_path)
-    convert(temp_pptx, output_path)
+    # Set up for rendering each slide's content to the PDF
+    for slide_number, slide in enumerate(presentation.slides):
+        pdf_canvas.setPageSize((slide_width, slide_height))
+        pdf_canvas.showPage()
+
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text = shape.text.strip()
+                if text:
+                    pdf_canvas.drawString(100, slide_height - 100, text)
+
+        # Move to the next page if necessary
+        pdf_canvas.showPage()
+
+    pdf_canvas.save()
 
 # Function to convert Word DOCX to PDF
 def convert_docx_to_pdf(input_path, output_path):
